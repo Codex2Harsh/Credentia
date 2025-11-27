@@ -11,7 +11,8 @@
 
 Unlike traditional databases where records can be altered or deleted, Credentia secures student data using cryptographic hashing on a decentralized ledger.
 
-![Main Dashboard](image_a64696.png)
+<img width="1877" height="895" alt="image" src="https://github.com/user-attachments/assets/5908d114-12eb-487b-9580-5933a2b3cbb0" />
+
 
 ---
 
@@ -40,21 +41,25 @@ Unlike traditional databases where records can be altered or deleted, Credentia 
 ### 1. Live Blockchain Network
 The application features a live visualization of the blockchain network, showing blocks as they are mined and verified in real-time.
 
-![Blockchain Visualizer](image_b0243e.png)
+<img width="785" height="354" alt="image" src="https://github.com/user-attachments/assets/1e7d796a-90bd-4fa1-8b39-0c4907df335e" />
+
 
 ### 2. Issuing a Credential (University Role)
 The Admin enters the Student Name, Unique ID, Course, and Email. The system generates a unique cryptographic hash using `keccak256`.
 
-![Issuing Interface](image_a64696.png)
+<img width="1877" height="895" alt="image" src="https://github.com/user-attachments/assets/a4f88ba3-474c-4e47-adae-006c085e650b" />
+
 
 **Success State:** Once the block is mined, the system confirms the issuance and sends a simulated email to the student.
 
-![Success Message](image_a646b3.png)
+<img width="1890" height="916" alt="image" src="https://github.com/user-attachments/assets/33358a6f-e45d-4f87-b584-eb829232fea7" />
+
 
 ### 3. Verifying a Credential (Employer Role)
 The Employer receives a Hash ID from the candidate and pastes it into the portal. The system queries the blockchain to validate the record instantly.
 
-![Verification Interface](image_a646d5.jpg)
+<img width="1886" height="918" alt="image" src="https://github.com/user-attachments/assets/d7eaacba-3713-4d1d-a3c2-1965e2cc6ebe" />
+
 
 ---
 
@@ -80,8 +85,9 @@ cd Credentia
 ### Step 2: Install Dependencies
 npm install
 ### Step 3: Run the Application
-npm run dev
-Open your browser and navigate to: http://localhost:5173 (or the port shown in your terminal).
+npm run dev 
+Open your browser and navigate to: http://localhost:5173 (or the part shown in you terminal).
+
 ---
 
 ## ⛓️ Smart Contract Deployment
