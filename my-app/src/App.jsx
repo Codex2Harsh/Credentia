@@ -1,24 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BadgeCheck, Search, FileText, School, User, Calendar, Shield, ExternalLink, Code, Activity, CheckCircle, AlertCircle, Copy, Check, ChevronDown, ChevronUp, Box, Link as LinkIcon, Fingerprint, Mail, X, Layers, Server, Globe, Database, ArrowRight } from 'lucide-react';
+import { BadgeCheck, Search, FileText, School, User, Shield, ExternalLink, Code, Activity, CheckCircle, AlertCircle, Copy, Check, ChevronDown, ChevronUp, Box, Link as LinkIcon, Fingerprint, Mail, X, Layers, Globe, Database, ArrowRight } from 'lucide-react';
 
-/**
- * MOCK BLOCKCHAIN LOGIC
- */
-const mockHash = (str) => {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash;
-  }
-  return '0x' + Math.abs(hash).toString(16) + Math.random().toString(16).substr(2, 10);
-};
+// --- REAL BLOCKCHAIN IMPORT ---
+import { ethers } from 'ethers'; 
+// If this fails locally, run: npm install ethers
+
+import { CONTRACT_ADDRESS, CONTRACT_ABI } from './contractConfig.js';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('issue');
-  const [blockchainData, setBlockchainData] = useState({});
   const [logs, setLogs] = useState([]);
-  
+
+  // Blockchain State
+  const [contract, setContract] = useState(null);
+  const [account, setAccount] = useState(null);
+  const [isConnected, setIsConnected] = useState(false);
+
   // Issuer Form State
   const [studentName, setStudentName] = useState('');
   const [studentID, setStudentID] = useState('');
@@ -37,114 +34,187 @@ export default function App() {
   const [verifyError, setVerifyError] = useState(null);
   const [highlightedBlockHash, setHighlightedBlockHash] = useState(null); 
 
-  // Logic Toggle State
+  // UI State
   const [showLogic, setShowLogic] = useState(false);
-  
-  // Ref for scrolling to blocks
   const blocksContainerRef = useRef(null);
+  const [visualBlocks, setVisualBlocks] = useState([]); 
 
   const addLog = (message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
     setLogs(prev => [{ time: timestamp, message, type }, ...prev]);
   };
 
+  // --- 1. AUTO-CONNECT TO WALLET ON LOAD ---
+  useEffect(() => {
+    const initBlockchain = async () => {
+      if (typeof window.ethereum !== 'undefined') {
+        try {
+          // NOTE: ethers v6 BrowserProvider
+          const provider = new ethers.BrowserProvider(window.ethereum);
+          const signer = await provider.getSigner();
+          const address = await signer.getAddress();
+
+          // Connect to Contract with signer
+          const deployedContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+
+          setAccount(address);
+          setContract(deployedContract);
+          setIsConnected(true);
+          addLog(`Connected to MetaMask: ${address.slice(0,6)}...`, 'success');
+        } catch (error) {
+          console.error("Connection Error", error);
+          addLog("MetaMask found but not authorized.", "error");
+        }
+      } else {
+        addLog("MetaMask not found. Please install extension.", "error");
+      }
+    };
+    initBlockchain();
+  }, []);
+
   const handleCopy = (text) => {
-    const textArea = document.createElement("textarea");
-    textArea.value = text;
-    textArea.style.position = "fixed";
-    textArea.style.left = "-9999px";
-    textArea.style.top = "0";
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    try {
-      document.execCommand('copy');
-      setCopied(true);
-      addLog('Hash successfully copied to clipboard.', 'success');
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      addLog('Failed to copy hash automatically.', 'error');
-    }
-    document.body.removeChild(textArea);
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleIssue = (e) => {
+  // --- 2. ISSUE CREDENTIAL (REAL TRANSACTION) ---
+  const handleIssue = async (e) => {
     e.preventDefault();
     setIssueError(null);
     setLastHash(null);
 
-    if (!studentName || !course || !studentID || !studentEmail) return;
-
-    // CHECK FOR DUPLICATES
-    const existingStudent = Object.values(blockchainData).find(
-      record => record.studentID === studentID
-    );
-
-    if (existingStudent) {
-      setIssueError(`Error: Student ID "${studentID}" already has a credential on the chain.`);
-      addLog(`Transaction Rejected: Duplicate Student ID ${studentID}`, 'error');
+    if (!contract) {
+      alert("MetaMask is not connected. Please unlock your wallet extension.");
       return;
     }
 
-    setIsProcessing(true);
-    addLog(`Initiating transaction: issueCredential("${studentName}", "${studentID}")...`);
+    if (!studentName || !course || !studentID || !studentEmail) return;
 
-    setTimeout(() => {
-      const recordId = mockHash(studentName + studentID + course + Date.now());
+    // Normalize student ID to avoid duplicates due to spacing/case
+    const normalizedStudentID = studentID.trim().toLowerCase();
+
+    try {
+      // OPTIONAL CLIENT-SIDE CHECK (saves user gas and improves UX)
+      let exists = false;
+      try {
+        if (typeof contract.checkIdExists === 'function') {
+          exists = await contract.checkIdExists(normalizedStudentID);
+        }
+      } catch (err) {
+        // If checkIdExists not present or fails, ignore and rely on contract revert
+        console.warn("checkIdExists call failed or not available:", err);
+      }
+
+      if (exists) {
+        setIssueError("This Student ID has already been issued. Duplicate prevented.");
+        addLog("Duplicate Student ID prevented (client-side check).", "error");
+        return;
+      }
+
+      setIsProcessing(true);
+      addLog(`Initiating transaction for ID: ${normalizedStudentID}...`);
+
+      // Call updated contract signature: issueCredential(studentName, studentID, course, institution)
+      // (Contract must be redeployed with this signature and checkIdExists for client-side check to work)
+      const tx = await contract.issueCredential(studentName, normalizedStudentID, course, institution);
       
-      const newRecord = {
-        studentName,
-        studentID,
-        studentEmail, // Store email in record
-        courseName: course,
-        institution,
-        issueDate: Date.now(),
-        issuer: '0x123...abc',
-        isValid: true,
-        blockNumber: Object.keys(blockchainData).length + 10245 
-      };
+      addLog(`Transaction sent! Hash: ${tx.hash?.slice ? tx.hash.slice(0, 15) + '...' : tx.hash}`, "info");
+      addLog("Waiting for block confirmation...", "info");
 
-      setBlockchainData(prev => ({ ...prev, [recordId]: newRecord }));
-      setLastHash(recordId);
-      setIsProcessing(false);
-      
-      addLog(`Transaction Mined! Block #${newRecord.blockNumber}`, 'success');
-      addLog(`Event Emitted: CredentialIssued(recordId: ${recordId})`, 'success');
-      addLog(`Certificate copy sent to ${studentEmail}`, 'success');
+      // Wait for Mining
+      const receipt = await tx.wait();
 
-      // Save email for the dialog before clearing
+      // Retrieve the Event Log to get the specific Hash ID
+      let minedRecordId = null;
+      if (receipt.logs) {
+        receipt.logs.forEach((log) => {
+          try {
+            // parseLog can throw for unrelated logs
+            const parsedLog = contract.interface.parseLog(log);
+            if (parsedLog && parsedLog.name === "CredentialIssued") {
+              // First arg is usually recordId
+              minedRecordId = parsedLog.args[0];
+            }
+          } catch (e) { /* ignore other events */ }
+        });
+      }
+
+      // Fallback: if the event wasn't parsed, try to use tx.hash
+      if (!minedRecordId) {
+         addLog("Note: Using Transaction Hash as reference.", "info");
+         minedRecordId = tx.hash || (receipt && receipt.transactionHash) || null; 
+      }
+
+      setLastHash(minedRecordId);
       setLastIssuedEmail(studentEmail);
+
+      // Update Visuals
+      setVisualBlocks(prev => [...prev, { hash: minedRecordId, blockNumber: receipt.blockNumber }]);
+
+      addLog(`Transaction Mined! Block #${receipt.blockNumber}`, 'success');
+      addLog(`Credential Hash Issued: ${minedRecordId}`, 'success');
+      addLog(`Certificate copy sent to ${studentEmail}`, 'success');
 
       // Clear form fields
       setStudentName('');
       setStudentID('');
       setStudentEmail('');
       setCourse('');
-      
-      if (blocksContainerRef.current) {
-        setTimeout(() => {
-          blocksContainerRef.current.scrollLeft = blocksContainerRef.current.scrollWidth;
-        }, 100);
-      }
-    }, 2000);
+      setIsProcessing(false);
+
+    } catch (err) {
+      console.error(err);
+      // Ethers v6 errors might have .reason or .message
+      const friendly = (err && (err.reason || err.message)) ? (err.reason || err.message) : "Transaction failed or reverted";
+      setIssueError(friendly);
+      addLog("Transaction Failed: " + friendly, "error");
+      setIsProcessing(false);
+    }
   };
 
-  const handleVerify = (e) => {
+  // --- 3. VERIFY CREDENTIAL (REAL READ) ---
+  const handleVerify = async (e) => {
     e.preventDefault();
     setVerifyError(null);
     setVerificationResult(null);
     setHighlightedBlockHash(null);
 
+    if (!contract) return;
     if (!searchHash) return;
 
-    addLog(`Querying blockchain state for ID: ${searchHash}...`);
+    try {
+      addLog(`Querying Blockchain Ledger for ID: ${searchHash}...`);
 
-    setTimeout(() => {
-      const record = blockchainData[searchHash];
-      if (record) {
-        setVerificationResult(record);
+      // Call Smart Contract
+      const result = await contract.verifyCredential(searchHash);
+      
+      // Verify the result structure based on your ABI
+      const isValid = result[4]; // 5th element is boolean
+
+      if (isValid) {
+        // Separate Name and ID for display
+        const rawName = result[0];
+        let displayName = rawName;
+        let displayID = "Hidden / On-Chain";
+        
+        if (rawName && rawName.includes("[ID:")) {
+            const parts = rawName.split("[ID:");
+            displayName = parts[0].trim();
+            displayID = parts[1].replace("]", "").trim();
+        }
+
+        setVerificationResult({
+          studentName: displayName,
+          studentID: displayID,
+          courseName: result[1],
+          institution: result[2],
+          issueDate: Number(result[3]) * 1000, 
+          issuer: "Verified Publisher" 
+        });
+        
         setHighlightedBlockHash(searchHash);
-        addLog('Record found and validated.', 'success');
+        addLog('Record found and validated on-chain.', 'success');
         
         const blockElement = document.getElementById(`block-${searchHash}`);
         if (blockElement) {
@@ -153,12 +223,14 @@ export default function App() {
 
       } else {
         setVerifyError('Credential ID not found on the blockchain.');
-        addLog('Query returned null. Invalid ID.', 'error');
+        addLog('Query returned null or invalid.', 'error');
       }
-    }, 800);
+    } catch (err) {
+      console.error(err);
+      setVerifyError('Credential ID not found on the blockchain.');
+      addLog('Query failed. Invalid Hash?', 'error');
+    }
   };
-
-  const blocks = Object.entries(blockchainData).map(([hash, data]) => ({ hash, ...data }));
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col">
@@ -172,9 +244,13 @@ export default function App() {
               <p className="text-blue-200 text-sm">Ethereum-based Credential Verification System</p>
             </div>
           </div>
+          
+          {/* Network Indicator (No Button) */}
           <div className="hidden md:flex items-center space-x-2 bg-blue-900/50 px-4 py-2 rounded-full border border-blue-500/30">
-            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-            <span className="text-xs font-mono text-blue-100">Network: Sepolia Testnet (Simulated)</span>
+            <div className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-400 animate-pulse" : "bg-red-400"}`}></div>
+            <span className="text-xs font-mono text-blue-100">
+              {isConnected ? "Network: Sepolia (Active)" : "Network: Disconnected"}
+            </span>
           </div>
         </div>
       </header>
@@ -379,19 +455,12 @@ export default function App() {
                                   : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
                               }`}
                             >
-                              {copied ? (
-                                <>
-                                  <Check className="w-3 h-3" />
-                                  <span>Copied!</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Copy className="w-3 h-3" />
-                                  <span>Copy</span>
-                                </>
-                              )}
+                              {copied ? <span>Copied!</span> : <span>Copy Hash</span>}
                             </button>
                           </div>
+                          <p className="text-[10px] text-slate-500 mt-2">
+                            Use this Hash to verify the user on Remix IDE or the Verify tab.
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -598,7 +667,7 @@ export default function App() {
               </div>
 
               {/* Render Mined Blocks */}
-              {blocks.map((block, idx) => {
+              {visualBlocks.map((block, idx) => {
                 const isHighlighted = highlightedBlockHash === block.hash;
                 return (
                   <div 

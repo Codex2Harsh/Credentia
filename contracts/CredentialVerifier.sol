@@ -1,15 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-/**
- * @title CredentialVerifier
- * @dev A smart contract to issue and verify academic credentials on the Ethereum blockchain.
- */
 contract CredentialVerifier {
     
-    // Structure to hold credential details
     struct Credential {
         string studentName;
+        string studentID;        // new: store the human-readable ID
         string courseName;
         string institution;
         uint256 issueDate;
@@ -17,33 +13,35 @@ contract CredentialVerifier {
         bool isValid;
     }
 
-    // Mapping to store credentials. 
-    // The key is a unique hash (bytes32), and the value is the Credential struct.
+    // map recordId => Credential
     mapping(bytes32 => Credential) public credentials;
 
-    // Event declared to notify frontend applications when a credential is created
-    event CredentialIssued(bytes32 indexed recordId, address indexed issuer);
+    // track if a student ID (hashed) is already used
+    mapping(bytes32 => bool) public idExists;
 
-    /**
-     * @dev Issues a new credential.
-     * @param _studentName Name of the student.
-     * @param _courseName Name of the degree/course.
-     * @param _institution Name of the university/organization.
-     * @return recordId The unique hash (ID) of the new credential.
-     */
+    event CredentialIssued(bytes32 indexed recordId, bytes32 indexed studentIdHash, address indexed issuer);
+
+    // updated signature to take studentID separately
     function issueCredential(
-        string memory _studentName, 
-        string memory _courseName, 
+        string memory _studentName,
+        string memory _studentID,
+        string memory _courseName,
         string memory _institution
     ) public returns (bytes32) {
         
-        // Generate a unique ID for the credential based on input data and timestamp
-        // keccak256 is the standard hashing algorithm used in Ethereum
-        bytes32 recordId = keccak256(abi.encodePacked(_studentName, _courseName, _institution, block.timestamp, msg.sender));
+        // normalize by hashing the provided studentID (client should trim/lowercase ideally)
+        bytes32 studentIdHash = keccak256(abi.encodePacked(_studentID));
 
-        // Store the credential in the blockchain state
+        // prevent duplicate issuance for the same student ID
+        require(!idExists[studentIdHash], "Student ID already issued");
+
+        // 1. Create unique hash from student data + timestamp
+        bytes32 recordId = keccak256(abi.encodePacked(_studentName, _studentID, _courseName, _institution, block.timestamp, msg.sender));
+
+        // 2. Write to Blockchain Storage
         credentials[recordId] = Credential({
             studentName: _studentName,
+            studentID: _studentID,
             courseName: _courseName,
             institution: _institution,
             issueDate: block.timestamp,
@@ -51,28 +49,23 @@ contract CredentialVerifier {
             isValid: true
         });
 
-        // Emit an event so the outside world knows a block was written
-        emit CredentialIssued(recordId, msg.sender);
+        // mark this studentID as used
+        idExists[studentIdHash] = true;
 
+        emit CredentialIssued(recordId, studentIdHash, msg.sender);
         return recordId;
     }
 
-    /**
-     * @dev Verifies if a credential exists and returns its details.
-     * @param _recordId The unique hash of the credential to verify.
-     */
-    function verifyCredential(bytes32 _recordId) public view returns (
-        string memory studentName,
-        string memory courseName,
-        string memory institution,
-        uint256 issueDate,
-        bool isValid
-    ) {
+    // verify by recordId (same as before)
+    function verifyCredential(bytes32 _recordId) public view returns (string memory, string memory, string memory, uint256, bool) {
         Credential memory c = credentials[_recordId];
-        
-        // Require that the credential actually exists (isValid is true)
-        require(c.isValid, "Credential not found or invalid.");
-
+        require(c.isValid, "Credential not found.");
         return (c.studentName, c.courseName, c.institution, c.issueDate, c.isValid);
+    }
+
+    // optional helper: query whether an ID (string) is already issued
+    function checkIdExists(string memory _studentID) public view returns (bool) {
+        bytes32 studentIdHash = keccak256(abi.encodePacked(_studentID));
+        return idExists[studentIdHash];
     }
 }
